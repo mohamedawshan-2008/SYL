@@ -1,0 +1,35 @@
+name: Build SYL APK
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.24.5
+          channel: stable
+      - name: Generate Android project
+        run: |
+          flutter create --platforms=android --org com.syl --project-name syl .
+          rm -rf test
+      - name: Configure Android (permissions, name, minSdk)
+        run: |
+          M=android/app/src/main/AndroidManifest.xml
+          sed -i '/<application/i <uses-permission android:name="android.permission.INTERNET"/>\n<uses-permission android:name="android.permission.CAMERA"/>\n<uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n<uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS"/>' $M
+          sed -i 's/android:label="[^"]*"/android:label="SYL"/' $M
+          sed -i 's/flutter\.minSdkVersion/23/' android/app/build.gradle* 
+      - run: flutter pub get
+      - run: flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SYL-apk
+          path: build/app/outputs/flutter-apk/app-release.apk
