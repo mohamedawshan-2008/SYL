@@ -30,7 +30,7 @@ jobs:
       - name: Add background service
         run: |
           M=android/app/src/main/AndroidManifest.xml
-          sed -i '/<application/i <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>\n<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n<uses-permission android:name="android.permission.WAKE_LOCK"/>' $M
+          sed -i '/<application/i <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>\n<uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA"/>\n<uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>\n<uses-permission android:name="android.permission.WAKE_LOCK"/>\n<uses-permission android:name="android.permission.RECORD_AUDIO"/>' $M
           sed -i '/<\/application>/i <service android:name="com.pravera.flutter_foreground_task.service.ForegroundService" android:foregroundServiceType="camera" android:exported="false" />' $M
       - run: flutter pub get
       - run: flutter build apk --release
