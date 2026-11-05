@@ -214,6 +214,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   String? sid, viewer;
   bool fg = true;
   bool bg = false;
+  bool talking = false;
 
   Future<void> startFg() async {
     await FlutterForegroundTask.startService(
@@ -279,7 +280,20 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
       return;
     }
     final d = snap.data()!;
-    if (!fg || d['sid'] == sid || d['answer'] != null) return;
+    if (d['sid'] == sid) {
+      final m = d['mic'] == true;
+      if (m != talking) {
+        if (mounted) setState(() => talking = m);
+        if (bg) {
+          FlutterForegroundTask.updateService(
+              notificationTitle: '💗 $viewer is looking at you${m ? ' · 🎤 speaking' : ''}',
+              notificationText: 'Open SYL to stop.');
+        }
+        if (m) HapticFeedback.mediumImpact();
+      }
+      return;
+    }
+    if (!fg || d['answer'] != null) return;
     await startShare(d);
   }
 
@@ -296,6 +310,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     local = await navigator.mediaDevices.getUserMedia({'audio': false, 'video': {'facingMode': 'user'}});
     final conn = await createPeerConnection(rtcConfig);
     pc = conn;
+    await Helper.setSpeakerphoneOn(true);
     for (final t in local!.getTracks()) {
       conn.addTrack(t, local!);
     }
@@ -323,6 +338,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     local = null;
     pc = null;
     sid = null;
+    talking = false;
     if (deleteDoc) pair.collection('sessions').doc(myUid).delete();
     if (viewer != null && bg) {
       FlutterForegroundTask.updateService(
@@ -396,7 +412,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                   decoration: BoxDecoration(color: Colors.pinkAccent, borderRadius: BorderRadius.circular(14)),
                   child: Row(children: [
                     Expanded(
-                        child: Text('💗 $viewer is looking at you',
+                        child: Text('💗 $viewer is looking at you${talking ? ' · 🎤 speaking' : ''}',
                             style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600, color: Colors.white))),
                     TextButton(
                         onPressed: () async {
@@ -443,7 +459,9 @@ class _ViewScreenState extends State<ViewScreen> {
   Timer? timeout;
   late final Doc ref = widget.pair.collection('sessions').doc(widget.targetUid);
   String status = 'Connecting…';
-  bool live = false, answered = false;
+  bool live = false, answered = false, mic = false;
+  RTCRtpSender? micSender;
+  MediaStream? micStream;
 
   @override
   void initState() {
@@ -459,6 +477,10 @@ class _ViewScreenState extends State<ViewScreen> {
       await conn.addTransceiver(
           kind: RTCRtpMediaType.RTCRtpMediaTypeVideo,
           init: RTCRtpTransceiverInit(direction: TransceiverDirection.RecvOnly));
+      final at = await conn.addTransceiver(
+          kind: RTCRtpMediaType.RTCRtpMediaTypeAudio,
+          init: RTCRtpTransceiverInit(direction: TransceiverDirection.SendOnly));
+      micSender = at.sender;
       conn.onTrack = (e) {
         if (e.streams.isNotEmpty && mounted) {
           renderer.srcObject = e.streams[0];
@@ -501,8 +523,41 @@ class _ViewScreenState extends State<ViewScreen> {
     }
   }
 
+  Future<void> stopMic() async {
+    for (final t in micStream?.getTracks() ?? <MediaStreamTrack>[]) {
+      t.stop();
+    }
+    await micStream?.dispose();
+    micStream = null;
+  }
+
+  Future<void> toggleMic() async {
+    if (micSender == null) return;
+    final next = !mic;
+    if (next) {
+      final st = await Permission.microphone.request();
+      if (!st.isGranted) {
+        if (mounted) {
+          ScaffoldMessenger.of(context)
+              .showSnackBar(const SnackBar(content: Text('Microphone permission is needed to speak.')));
+        }
+        return;
+      }
+      micStream = await navigator.mediaDevices.getUserMedia({'audio': true, 'video': false});
+      await micSender!.replaceTrack(micStream!.getAudioTracks().first);
+    } else {
+      await micSender!.replaceTrack(null);
+      await stopMic();
+    }
+    if (mounted) setState(() => mic = next);
+    try {
+      await ref.update({'mic': next});
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
+    stopMic();
     timeout?.cancel();
     sessSub?.cancel();
     iceSub?.cancel();
@@ -515,6 +570,14 @@ class _ViewScreenState extends State<ViewScreen> {
   @override
   Widget build(BuildContext context) => Scaffold(
         appBar: AppBar(title: Text(widget.targetName)),
+        floatingActionButton: live
+            ? FloatingActionButton.extended(
+                onPressed: toggleMic,
+                backgroundColor: mic ? Colors.pinkAccent : null,
+                icon: Icon(mic ? Icons.mic : Icons.mic_off),
+                label: Text(mic ? 'Mic ON · tap to mute' : 'Mic off · tap to speak'),
+              )
+            : null,
         body: live
             ? RTCVideoView(renderer, objectFit: RTCVideoViewObjectFit.RTCVideoViewObjectFitCover, mirror: true)
             : Center(child: Text(status, textAlign: TextAlign.center)),
