@@ -4,6 +4,7 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,6 +36,20 @@ StreamSubscription listenIce(Doc pair, String sid, RTCPeerConnection pc, String 
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  FlutterForegroundTask.init(
+    androidNotificationOptions: AndroidNotificationOptions(
+      channelId: 'syl_service',
+      channelName: 'SYL',
+      channelDescription: 'Shows that SYL is available to your partner',
+      channelImportance: NotificationChannelImportance.HIGH,
+      priority: NotificationPriority.HIGH,
+      enableVibration: true,
+      playSound: false,
+    ),
+    iosNotificationOptions: const IOSNotificationOptions(),
+    foregroundTaskOptions: const ForegroundTaskOptions(
+        interval: 60000, autoRunOnBoot: false, allowWakeLock: true, allowWifiLock: true),
+  );
   await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform);
   if (FirebaseAuth.instance.currentUser == null) {
     await FirebaseAuth.instance.signInAnonymously();
@@ -198,6 +213,25 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   MediaStream? local;
   String? sid, viewer;
   bool fg = true;
+  bool bg = false;
+
+  Future<void> startFg() async {
+    await FlutterForegroundTask.startService(
+        notificationTitle: 'SYL is on',
+        notificationText: 'Your partner can look when they tap your name. Open SYL to turn off.');
+  }
+
+  Future<void> setBg(bool on) async {
+    if (on) {
+      await Permission.notification.request();
+      await startFg();
+    } else {
+      await FlutterForegroundTask.stopService();
+    }
+    final p = await SharedPreferences.getInstance();
+    await p.setBool('bg', on);
+    if (mounted) setState(() => bg = on);
+  }
 
   Future<void> setOnline(bool on) => pair
       .collection('members')
@@ -209,6 +243,12 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     start();
+    SharedPreferences.getInstance().then((p) {
+      if (p.getBool('bg') == true) {
+        startFg();
+        if (mounted) setState(() => bg = true);
+      }
+    });
   }
 
   void start() {
@@ -224,7 +264,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     if (s == AppLifecycleState.resumed) {
       fg = true;
       start();
-    } else if (s == AppLifecycleState.paused) {
+    } else if (s == AppLifecycleState.paused && !bg) {
       fg = false;
       beat?.cancel();
       sessionSub?.cancel();
@@ -248,6 +288,10 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     sid = d['sid'];
     if (mounted) setState(() => viewer = d['viewerName']);
     HapticFeedback.heavyImpact();
+    if (bg) {
+      FlutterForegroundTask.updateService(
+          notificationTitle: '💗 ${d['viewerName']} is looking at you', notificationText: 'Open SYL to stop.');
+    }
     final mySid = sid!;
     local = await navigator.mediaDevices.getUserMedia({'audio': false, 'video': {'facingMode': 'user'}});
     final conn = await createPeerConnection(rtcConfig);
@@ -280,6 +324,11 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     pc = null;
     sid = null;
     if (deleteDoc) pair.collection('sessions').doc(myUid).delete();
+    if (viewer != null && bg) {
+      FlutterForegroundTask.updateService(
+          notificationTitle: 'SYL is on',
+          notificationText: 'Your partner can look when they tap your name. Open SYL to turn off.');
+    }
     if (mounted && viewer != null) setState(() => viewer = null);
   }
 
@@ -327,10 +376,19 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
                 IconButton(
                     icon: const Icon(Icons.logout),
                     onPressed: () {
+                      FlutterForegroundTask.stopService();
+                      SharedPreferences.getInstance().then((p) => p.setBool('bg', false));
                       setOnline(false);
                       widget.onLeave();
                     }),
               ]),
+              SwitchListTile(
+                contentPadding: EdgeInsets.zero,
+                title: const Text('Stay available in background'),
+                subtitle: const Text('Shows a permanent notification. Turn on while SYL is open.'),
+                value: bg,
+                onChanged: setBg,
+              ),
               if (viewer != null)
                 Container(
                   margin: const EdgeInsets.only(top: 12),
