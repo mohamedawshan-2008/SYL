@@ -225,6 +225,9 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
   Future<void> setBg(bool on) async {
     if (on) {
       await Permission.notification.request();
+      if (!await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+      }
       await startFg();
     } else {
       await FlutterForegroundTask.stopService();
@@ -401,7 +404,8 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
                 title: const Text('Stay available in background'),
-                subtitle: const Text('Shows a permanent notification. Turn on while SYL is open.'),
+                subtitle: const Text(
+                    'Shows a permanent notification and keeps working even after you close the app. Turn it off, force-stop SYL in Android Settings, or restart the phone to end it.'),
                 value: bg,
                 onChanged: setBg,
               ),
