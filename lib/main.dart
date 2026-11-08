@@ -15,9 +15,26 @@ final db = FirebaseFirestore.instance;
 String get myUid => FirebaseAuth.instance.currentUser!.uid;
 const rtcConfig = {
   'iceServers': [
-    {'urls': 'stun:stun.l.google.com:19302'}
+    {'urls': 'stun:stun.l.google.com:19302'},
+    {
+      'urls': 'turn:openrelay.metered.ca:80',
+      'username': 'openrelayproject',
+      'credential': 'openrelayproject'
+    },
+    {
+      'urls': 'turn:openrelay.metered.ca:443',
+      'username': 'openrelayproject',
+      'credential': 'openrelayproject'
+    },
   ]
 };
+
+Future<void> wipeIce(Doc pair, String sid) async {
+  final docs = await pair.collection('ice').where('sid', isEqualTo: sid).get();
+  for (final d in docs.docs) {
+    d.reference.delete();
+  }
+}
 Doc pairDoc(String code) => db.collection('pairs').doc(code);
 
 StreamSubscription listenIce(Doc pair, String sid, RTCPeerConnection pc, String other) {
@@ -340,6 +357,7 @@ class _HomeState extends State<Home> with WidgetsBindingObserver {
     await pc?.close();
     local = null;
     pc = null;
+    if (sid != null) wipeIce(pair, sid!);
     sid = null;
     talking = false;
     if (deleteDoc) pair.collection('sessions').doc(myUid).delete();
@@ -492,6 +510,7 @@ class _ViewScreenState extends State<ViewScreen> {
         }
       };
       final sid = DateTime.now().microsecondsSinceEpoch.toString();
+      mySid = sid;
       conn.onIceCandidate = (c) {
         if (c.candidate != null) widget.pair.collection('ice').add({'sid': sid, 'from': 'viewer', 'c': c.toMap()});
       };
@@ -559,6 +578,8 @@ class _ViewScreenState extends State<ViewScreen> {
     } catch (_) {}
   }
 
+  String? mySid;
+
   @override
   void dispose() {
     stopMic();
@@ -566,6 +587,7 @@ class _ViewScreenState extends State<ViewScreen> {
     sessSub?.cancel();
     iceSub?.cancel();
     ref.delete();
+    if (mySid != null) wipeIce(widget.pair, mySid!);
     pc?.close();
     renderer.dispose();
     super.dispose();
