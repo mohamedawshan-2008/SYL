@@ -23,7 +23,10 @@ jobs:
           rm -rf test
       - name: Pin Gradle version
         run: |
-          sed -i 's#distributionUrl=.*#distributionUrl=https\\://services.gradle.org/distributions/gradle-8.3-all.zip#' android/gradle/wrapper/gradle-wrapper.properties
+          echo "distributionUrl=https://services.gradle.org/distributions/gradle-8.3-all.zip" > /tmp/gline
+          grep -v '^distributionUrl=' android/gradle/wrapper/gradle-wrapper.properties > /tmp/gw.properties
+          cat /tmp/gw.properties /tmp/gline > android/gradle/wrapper/gradle-wrapper.properties
+          cat android/gradle/wrapper/gradle-wrapper.properties
       - name: Configure Android (permissions, name, minSdk)
         run: |
           M=android/app/src/main/AndroidManifest.xml
